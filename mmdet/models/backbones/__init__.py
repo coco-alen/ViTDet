@@ -19,6 +19,8 @@ from .vit import ViT
 from .vitae import ViTAE
 from .vitae_s import ViTAE_S
 
+from .vit_linearAttn import ViT_linearAttn
+
 __all__ = [
     'RegNet', 'ResNet', 'ResNetV1d', 'ResNeXt', 'SSDVGG', 'HRNet',
     'MobileNetV2', 'Res2Net', 'HourglassNet', 'DetectoRS_ResNet',

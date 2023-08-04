@@ -14,7 +14,7 @@ model = dict(
     type='MaskRCNN',
     pretrained=pretrained,
     backbone=dict(
-        type='ViT',
+        type='ViT_linearAttn',
         img_size=1024,
         embed_dim=768,
         depth=12,
@@ -145,7 +145,7 @@ model = dict(
 optimizer = dict(
     _delete_=True,
     type='AdamW',
-    lr=0.0001,
+    lr=0.00002,
     betas=(0.9, 0.999),
     weight_decay=0.1,
     constructor='LayerDecayOptimizerConstructor', 
@@ -165,3 +165,4 @@ optimizer = dict(
 lr_config = dict(warmup_iters=250) # 16 * 1000 == 250 * 64
 
 load_from = './ckpt/ViT-Base-GPU.pth'
+work_dir = './ckpt/ViT-Base-linearAttn'
