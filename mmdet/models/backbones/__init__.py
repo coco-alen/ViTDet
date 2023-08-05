@@ -19,7 +19,7 @@ from .vit import ViT
 from .vitae import ViTAE
 from .vitae_s import ViTAE_S
 
-from .vit_linearAttn import ViT_linearAttn
+from .pvt_shiftadd import PyramidVisionTransformerV2_ShiftAdd
 
 __all__ = [
     'RegNet', 'ResNet', 'ResNetV1d', 'ResNeXt', 'SSDVGG', 'HRNet',

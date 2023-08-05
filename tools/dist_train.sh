@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 
-CONFIG=/data/hyou37/ViTDet/configs/pvt/retinanet_pvtv2-b0_fpn_1x_coco.py
+CONFIG=/data/hyou37/ViTDet/configs/pvt/retinanet_pvtv2-b0_shiftadd_1x_coco.py
 GPUS=7
 PORT=12834
 
