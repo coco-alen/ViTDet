@@ -333,7 +333,7 @@ class NaiveGate(BaseGate):
     `Gate` module.
     """
 
-    def __init__(self, d_model, num_expert, world_size, top_k=2):
+    def __init__(self, d_model, num_expert, world_size, top_k=1):
         super().__init__(num_expert, world_size)
         self.gate = nn.Linear(d_model, self.tot_expert)
         self.top_k = top_k
@@ -525,7 +525,15 @@ class PyTorchMoE_FC(nn.Module):
         inp = inp.reshape(-1, self.d_model)
         gates = self.gate(inp)
         dispatcher = SparseDispatcher(self.num_expert, gates)
-        expert_inputs = dispatcher.dispatch(inp)
+        try:
+            expert_inputs = dispatcher.dispatch(inp)
+        except:
+            print("inp:",inp)
+            print("gates:",gates)
+            print("dispatcher._part_sizes:",dispatcher._part_sizes)
+            print("dispatcher._batch_index",dispatcher._batch_index)
+            raise RuntimeError("Error in 'dispatcher.dispatch(inp)'")
+
         gates = dispatcher.expert_to_gates()
         expert_outputs = [self.experts[i](expert_inputs[i]) for i in range(self.num_expert)]
         y = dispatcher.combine(expert_outputs)
