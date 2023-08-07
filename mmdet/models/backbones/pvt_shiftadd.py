@@ -89,21 +89,21 @@ class Mlp(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
-        self.shape = []
+
         self.H = H
         self.W = W
-        self.shape.append(x.shape)
+
         x = self.fc1(x)
         # print(torch.isnan(x).any())
         if self.linear:
             x = self.relu(x)
-        self.shape.append(x.shape)
+
         x = self.dwconv(x, H, W)
         # print(torch.isnan(x).any())
         x = self.act(x)
         # print('ok')
         x = self.drop(x)
-        self.shape.append(x.shape)
+
         x = self.fc2(x)
         # print(torch.isnan(x).any())
         x = self.drop(x)
@@ -542,6 +542,24 @@ class PyTorchMoE_FC(nn.Module):
 
 # Linear Attention
 
+class BinaryQuantizer(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, input):
+        ctx.save_for_backward(input)
+        # out = torch.sign(input)
+        out = torch.sign(input).clamp(min=0.0)
+        return out
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        (input,) = ctx.saved_tensors
+        grad_input = grad_output.clone()
+        grad_input[input.ge(1)] = 0
+        # grad_input[input.le(-1)] = 0
+        grad_input[input.le(0)] = 0
+        return grad_input
+
+
 class LinAngularAttention(nn.Module):
     def __init__(
         self,
@@ -560,18 +578,8 @@ class LinAngularAttention(nn.Module):
         self.scale = head_dim**-0.5
         self.sparse_reg = sparse_reg
 
-        # self.q_quant = FastQuantQK(
-        #     head_dim, None, generalized_attention=False,
-        #     kernel_fn=nn.ReLU(), no_projection=False
-        # )
-        # self.k_quant = FastQuantQK(
-        #     head_dim, None, generalized_attention=False,
-        #     kernel_fn=nn.ReLU(), no_projection=False
-        # )
-
         self.qkv = PyTorchMoE_FC(dim, dim * 3, bias=qkv_bias)
-        # self.q = nn.Linear(dim, dim, bias=qkv_bias)
-        # self.kv = nn.Linear(dim, dim * 2, bias=qkv_bias)
+
         self.attn_drop = nn.Dropout(attn_drop)
         self.proj = PyTorchMoE_FC(dim, dim)
         self.proj_drop = nn.Dropout(proj_drop)
@@ -587,46 +595,44 @@ class LinAngularAttention(nn.Module):
 
     def forward(self, x, H, W):
         B, N, C = x.shape
+
+        if torch.isnan(x).any():
+            print("x input:",x)
+
         qkv = (
             self.qkv(x)
             .reshape(B, N, 3, self.num_heads, C // self.num_heads)
             .permute(2, 0, 3, 1, 4)
         )
-        q, k, v = qkv.unbind(0)  # make torchscript happy (cannot use tensor as tuple)
-        # B, N, C = x.shape
-        # q = (
-        #     self.q(x)
-        #     .reshape(B, N, self.num_heads, C // self.num_heads)
-        #     .permute(0, 2, 1, 3)
-        # )
-        # kv = (
-        #         self.kv(x)
-        #         .reshape(B, -1, 2, self.num_heads, C // self.num_heads)
-        #         .permute(2, 0, 3, 1, 4)
-        #     )
-        # k, v = kv[0], kv[1]
 
-        if self.sparse_reg:
-            attn = torch.matmul(q * self.scale, k.transpose(-2, -1))
-            attn = attn.softmax(dim=-1)
-            mask = attn > 0.02 # note that the threshold could be different; adapt to your codebases.
-            sparse = mask * attn
+        if torch.isnan(qkv).any():
+            print("qkv:", qkv)
+
+        q, k, v = qkv.unbind(0)  # make torchscript happy (cannot use tensor as tuple)
 
         q = q / q.norm(dim=-1, keepdim=True)
         k = k / k.norm(dim=-1, keepdim=True)
         # Quant
         scale1 = q.abs().mean()
         scale2 = k.abs().mean()
+        scale1 = torch.clamp(scale1, min=1e-2,max=1.0)
+        scale2 = torch.clamp(scale2, min=1e-2,max=1.0)
         # scale1 = 0.1
         # scale2 = 0.1
 
         binary_q_no_grad = torch.gt(q, 0).type(torch.float32) * scale1
-        cliped_q = torch.clamp(q, 0, 1.0)
+        cliped_q = torch.clamp(q, 0.0, 1.0)
         q = binary_q_no_grad.detach() - cliped_q.detach() + cliped_q
 
         binary_k_no_grad = torch.gt(k, 0).type(torch.float32) * scale2
-        cliped_k = torch.clamp(k, 0, 1.0)
+        cliped_k = torch.clamp(k, 0.0, 1.0)
         k = binary_k_no_grad.detach() - cliped_k.detach() + cliped_k
+
+        # scale1 = torch.clamp(scale1, min=1e-3,max=1.0)
+        # scale2 = torch.clamp(scale2, min=1e-3,max=1.0)
+        # q = BinaryQuantizer.apply(q) * scale1
+        # k = BinaryQuantizer.apply(k) * scale2
+
         # Quant end
 
         dconv_v = self.dconv(v)
@@ -702,22 +708,38 @@ class Mlp_FMoE(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
-        self.shape = []
+
         self.H = H
         self.W = W
-        self.shape.append(x.shape)
+
+        if torch.isnan(x).any():
+            print("x input:",x)
+
         x = self.fc1(x)
         if self.linear:
             x = self.relu(x)
-        self.shape.append(x.shape)
+
+        if torch.isnan(x).any():
+            print("x fc1:",x)
+
         x = self.dwconv(x, H, W)
+
+        if torch.isnan(x).any():
+            print("x dwconv:",x)
+
         x = self.act(x)
+
+        if torch.isnan(x).any():
+            print("x act:",x)
         # print('ok')
         x = self.drop(x)
-        self.shape.append(x.shape)
+
         x = self.fc2(x)
+        if torch.isnan(x).any():
+            print("x fc2:",x)
         x = self.drop(x)
-            
+        if torch.isnan(x).any():
+            print("x drop:",x)
         return x
 
 
@@ -746,7 +768,7 @@ class Block(nn.Module):
         flag = False,
     ):
         super().__init__()
-        self.norm1 = norm_layer(dim)
+        self.norm1 = norm_layer(dim,eps=1e-4)
         if last_stage:
             self.attn = Attention(
                 dim,
@@ -770,7 +792,7 @@ class Block(nn.Module):
 
         # NOTE: drop path for stochastic depth, we shall see if this is better than dropout here
         self.drop_path = DropPath(drop_path) if drop_path > 0.0 else nn.Identity()
-        self.norm2 = norm_layer(dim)
+        self.norm2 = norm_layer(dim,eps=1e-4)
         mlp_hidden_dim = int(dim * mlp_ratio)
         # if not moe or flag:
 
@@ -805,15 +827,20 @@ class Block(nn.Module):
                 m.bias.data.zero_()
 
     def forward(self, x, H, W):
-        # print(torch.isnan(x).any())
-        # print(torch.isnan(x.var()).any())
-        # print(torch.isnan(self.norm1(x)).any())
+        if torch.isnan(x).any():
+            print("x block input:",x)
+        x = self.norm1(x)
+        if torch.isnan(x).any():
+            print("x norm1:",x)
+        x = x + self.drop_path(self.attn(x, H, W))
         # print('ok')
-        x = x + self.drop_path(self.attn(self.norm1(x), H, W))
-        # print('ok')
         # print(torch.isnan(x).any())
-
-        x = x + self.drop_path(self.mlp(self.norm2(x), H, W))
+        if torch.isnan(x).any():
+            print("x attn:",x)
+        x = self.norm2(x)
+        if torch.isnan(x).any():
+            print("x norm2:",x)
+        x = x + self.drop_path(self.mlp(x, H, W))
         # print(torch.isnan(x).any())
         return x
 
